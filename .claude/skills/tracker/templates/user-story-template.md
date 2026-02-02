@@ -1,7 +1,7 @@
 # USER STORY: {US-ID} {Title}
 
 ## Meta
-- status: todo | in-progress | review | done
+- status: todo
 - feature: {FEAT-ID}
 - assignee: {name}
 - estimate: {hours/points}

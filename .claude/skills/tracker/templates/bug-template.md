@@ -1,8 +1,8 @@
 # BUG: {BUG-ID} {Title}
 
 ## Meta
-- status: new | confirmed | in-progress | resolved
-- severity: critical | high | medium | low
+- status: new
+- severity: medium
 - found-in: {version/environment}
 - assignee: {name}
 - created: {YYYY-MM-DD}

@@ -1,7 +1,7 @@
 # FEATURE: {FEAT-ID} {Title}
 
 ## Meta
-- status: draft | active | done
+- status: draft
 - epic: {EPIC-ID}
 - created: {YYYY-MM-DD}
 - owner: {name}

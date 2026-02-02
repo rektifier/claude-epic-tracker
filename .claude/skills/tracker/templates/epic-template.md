@@ -1,7 +1,7 @@
 # EPIC: {EPIC-ID} {Title}
 
 ## Meta
-- status: draft | active | done
+- status: draft
 - created: {YYYY-MM-DD}
 - owner: {name}
 - wiki: {link}

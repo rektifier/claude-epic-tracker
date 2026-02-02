@@ -18,12 +18,55 @@ get_next_id() {
     local type=$1
     local count=0
     case $type in
-        epic)   count=$(ls -d epics/EPIC-* 2>/dev/null | wc -l) ;;
-        feat)   count=$(find epics -type d -name "FEAT-*" 2>/dev/null | wc -l) ;;
-        us)     count=$(find epics -name "US-*.md" 2>/dev/null | wc -l) ;;
-        bug)    count=$(ls bugs/BUG-*.md 2>/dev/null | wc -l) ;;
+        epic)   count=$(ls -d tracker/epics/EPIC-* 2>/dev/null | wc -l) ;;
+        feat)   count=$(find tracker/epics -type d -name "FEAT-*" 2>/dev/null | wc -l) ;;
+        us)     count=$(find tracker/epics -name "US-*.md" 2>/dev/null | wc -l) ;;
+        bug)    count=$(ls tracker/bugs/BUG-*.md 2>/dev/null | wc -l) ;;
     esac
     printf "%03d" $((count + 1))
+}
+
+get_item_type() {
+    local id="$1"
+    case "$id" in
+        EPIC-*) echo "epic" ;;
+        FEAT-*) echo "feature" ;;
+        US-*)   echo "story" ;;
+        BUG-*)  echo "bug" ;;
+        *)      echo "unknown" ;;
+    esac
+}
+
+validate_status_transition() {
+    local item_type="$1"
+    local current="$2"
+    local new="$3"
+
+    # Same status is always allowed
+    [ "$current" = "$new" ] && return 0
+
+    case "$item_type" in
+        epic|feature)
+            # Valid: draft → active → done
+            case "$current→$new" in
+                "draft→active"|"active→done") return 0 ;;
+            esac
+            ;;
+        story)
+            # Valid: todo → in-progress → review → done
+            case "$current→$new" in
+                "todo→in-progress"|"in-progress→review"|"review→done") return 0 ;;
+            esac
+            ;;
+        bug)
+            # Valid: new → confirmed → in-progress → resolved
+            case "$current→$new" in
+                "new→confirmed"|"confirmed→in-progress"|"in-progress→resolved") return 0 ;;
+            esac
+            ;;
+    esac
+
+    return 1
 }
 
 
@@ -35,7 +78,7 @@ cmd_status() {
     echo "=== Project Backlog ==="
     echo ""
 
-    for epic_dir in epics/EPIC-*/; do
+    for epic_dir in tracker/epics/EPIC-*/; do
         [ -d "$epic_dir" ] || continue
 
         local epic_file="$epic_dir/epic.md"
@@ -63,9 +106,9 @@ cmd_status() {
         echo ""
     done
 
-    if ls bugs/BUG-*.md >/dev/null 2>&1; then
+    if ls tracker/bugs/BUG-*.md >/dev/null 2>&1; then
         echo "=== Bugs ==="
-        for bug_file in bugs/BUG-*.md; do
+        for bug_file in tracker/bugs/BUG-*.md; do
             local bug_title=$(head -1 "$bug_file" | sed 's/# BUG: //')
             local bug_status=$(grep "^- status:" "$bug_file" | cut -d: -f2 | tr -d ' ')
             local severity=$(grep "^- severity:" "$bug_file" | cut -d: -f2 | tr -d ' ')
@@ -83,9 +126,50 @@ cmd_list() {
     fi
 
     echo "=== Items with status: $filter ==="
-    grep -rl "status: $filter" epics/ bugs/ 2>/dev/null | while read file; do
-        head -1 "$file"
+
+    # Search epics
+    for epic_dir in tracker/epics/EPIC-*/; do
+        [ -d "$epic_dir" ] || continue
+        local epic_file="$epic_dir/epic.md"
+        local epic_status=$(grep "^- status:" "$epic_file" 2>/dev/null | cut -d: -f2 | tr -d ' ')
+        if [ "$epic_status" = "$filter" ]; then
+            local epic_title=$(head -1 "$epic_file" | sed 's/# EPIC: //')
+            echo "$epic_title [$epic_status]"
+        fi
+
+        # Search features
+        for feat_dir in "$epic_dir"features/FEAT-*/; do
+            [ -d "$feat_dir" ] || continue
+            local feat_file="$feat_dir/feature.md"
+            local feat_status=$(grep "^- status:" "$feat_file" 2>/dev/null | cut -d: -f2 | tr -d ' ')
+            if [ "$feat_status" = "$filter" ]; then
+                local feat_title=$(head -1 "$feat_file" | sed 's/# FEATURE: //')
+                echo "$feat_title [$feat_status]"
+            fi
+
+            # Search user stories
+            for story_file in "$feat_dir"user-stories/US-*.md; do
+                [ -f "$story_file" ] || continue
+                local story_status=$(grep "^- status:" "$story_file" | cut -d: -f2 | tr -d ' ')
+                if [ "$story_status" = "$filter" ]; then
+                    local story_title=$(head -1 "$story_file" | sed 's/# USER STORY: //')
+                    echo "$story_title [$story_status]"
+                fi
+            done
+        done
     done
+
+    # Search bugs
+    if ls tracker/bugs/BUG-*.md >/dev/null 2>&1; then
+        for bug_file in tracker/bugs/BUG-*.md; do
+            local bug_status=$(grep "^- status:" "$bug_file" | cut -d: -f2 | tr -d ' ')
+            if [ "$bug_status" = "$filter" ]; then
+                local bug_title=$(head -1 "$bug_file" | sed 's/# BUG: //')
+                local severity=$(grep "^- severity:" "$bug_file" | cut -d: -f2 | tr -d ' ')
+                echo "$bug_title [$bug_status] ($severity)"
+            fi
+        done
+    fi
 }
 
 # ============================================================
@@ -114,7 +198,7 @@ new_epic() {
 
     local id="EPIC-$(get_next_id epic)"
     local slug=$(slugify "$title")
-    local dir="epics/${id}-${slug}"
+    local dir="tracker/epics/${id}-${slug}"
 
     mkdir -p "$dir/features"
     sed -e "s/{EPIC-ID}/$id/g" \
@@ -135,7 +219,7 @@ new_feature() {
     [ -z "$epic_id" ] && { echo "Error: Epic ID required"; exit 1; }
     [ -z "$title" ] && { echo "Error: Title required"; exit 1; }
 
-    local epic_dir=$(ls -d epics/${epic_id}-* 2>/dev/null | head -1)
+    local epic_dir=$(ls -d tracker/epics/${epic_id}-* 2>/dev/null | head -1)
     [ -z "$epic_dir" ] && { echo "Error: Epic $epic_id not found"; exit 1; }
 
     local id="FEAT-$(get_next_id feat)"
@@ -166,7 +250,7 @@ new_story() {
     [ -z "$feat_id" ] && { echo "Error: Feature ID required"; exit 1; }
     [ -z "$title" ] && { echo "Error: Title required"; exit 1; }
 
-    local feat_dir=$(find epics -type d -name "${feat_id}-*" 2>/dev/null | head -1)
+    local feat_dir=$(find tracker/epics -type d -name "${feat_id}-*" 2>/dev/null | head -1)
     [ -z "$feat_dir" ] && { echo "Error: Feature $feat_id not found"; exit 1; }
 
     local id="US-$(get_next_id us)"
@@ -194,8 +278,8 @@ new_bug() {
     local id="BUG-$(get_next_id bug)"
     local slug=$(slugify "$title")
 
-    mkdir -p bugs
-    local file="bugs/${id}-${slug}.md"
+    mkdir -p tracker/bugs
+    local file="tracker/bugs/${id}-${slug}.md"
 
     sed -e "s/{BUG-ID}/$id/g" \
         -e "s/{Title}/$title/g" \
@@ -223,13 +307,33 @@ cmd_update() {
     # Find the file
     local file=""
     case "$id" in
-        EPIC-*) file=$(find epics -name "epic.md" -path "*${id}*" | head -1) ;;
-        FEAT-*) file=$(find epics -name "feature.md" -path "*${id}*" | head -1) ;;
-        US-*)   file=$(find epics -name "${id}*.md" | head -1) ;;
-        BUG-*)  file=$(ls bugs/${id}*.md 2>/dev/null | head -1) ;;
+        EPIC-*) file=$(find tracker/epics -name "epic.md" -path "*${id}*" | head -1) ;;
+        FEAT-*) file=$(find tracker/epics -name "feature.md" -path "*${id}*" | head -1) ;;
+        US-*)   file=$(find tracker/epics -name "${id}*.md" | head -1) ;;
+        BUG-*)  file=$(ls tracker/bugs/${id}*.md 2>/dev/null | head -1) ;;
     esac
 
     [ -z "$file" ] && { echo "Error: $id not found"; exit 1; }
+
+    # Validate status transitions
+    if [ "$field" = "status" ]; then
+        local item_type=$(get_item_type "$id")
+        local current_status=$(grep "^- status:" "$file" | cut -d: -f2 | tr -d ' ')
+
+        if ! validate_status_transition "$item_type" "$current_status" "$value"; then
+            echo "Error: Invalid status transition"
+            echo "  Cannot change $item_type from '$current_status' to '$value'"
+            case "$item_type" in
+                epic|feature)
+                    echo "  Valid transitions: draft → active → done" ;;
+                story)
+                    echo "  Valid transitions: todo → in-progress → review → done" ;;
+                bug)
+                    echo "  Valid transitions: new → confirmed → in-progress → resolved" ;;
+            esac
+            exit 1
+        fi
+    fi
 
     sed -i "s/^- ${field}:.*$/- ${field}: ${value}/" "$file"
     echo "✓ Updated: $file"
